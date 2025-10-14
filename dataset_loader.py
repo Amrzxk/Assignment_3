@@ -87,7 +87,7 @@ def print_dataset_summary(dataset_info):
     print(summary)
     
     # Save to file
-    with open('assignment_3/dataset_summary.md', 'w') as f:
+    with open('dataset_summary.md', 'w') as f:
         f.write(summary)
     
     return summary
