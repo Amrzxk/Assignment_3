@@ -67,7 +67,6 @@ class Assignment3Trainer:
         self.epochs = 5
         self.patch_size = 1
         self.print_interval = 50
-        self.require_real_seqtrack = os.getenv('REQUIRE_REAL_SEQTRACK', '0') in ['1', 'true', 'True', 'YES', 'yes']
         self.hf_repo_id: Optional[str] = os.getenv('HF_REPO_ID')  # e.g., org-or-user/assignment3-seqtrack
         self.hf_token: Optional[str] = os.getenv('HF_TOKEN')
 
@@ -144,59 +143,21 @@ class Assignment3Trainer:
 
     def load_dataset_info(self):
         """Load dataset information"""
-        try:
-            from dataset_loader import load_lasot_dataset, print_dataset_summary
-            dataset_info = load_lasot_dataset()
-            print_dataset_summary(dataset_info)
-            return dataset_info
-        except ImportError:
-            # Fallback mock data
-            return {
-                'selected_classes': ['airplane', 'bicycle'],
-                'class_counts': {'airplane': 150, 'bicycle': 120},
-                'total_samples': 270
-            }
+        from dataset_loader import load_lasot_dataset, print_dataset_summary
+        dataset_info = load_lasot_dataset()
+        print_dataset_summary(dataset_info)
+        return dataset_info
 
-    def create_mock_model(self):
-        """Create a mock model for demonstration purposes"""
-
-        class MockSeqTrack(nn.Module):
-            def __init__(self, patch_size):
-                super().__init__()
-                self.encoder = nn.Conv2d(3, 256, kernel_size=patch_size, padding=0)
-                self.decoder = nn.Linear(256, 4000)  # bins
-
-            def forward(self, x):
-                # Mock forward pass
-                x = self.encoder(x)
-                x = x.mean(dim=[2, 3])  # Global average pooling
-                x = self.decoder(x)
-                return x
-
-        return MockSeqTrack(self.patch_size)
-
-    def create_mock_dataloader(self):
-        """Create mock dataloader for demonstration"""
-
-        class MockDataset:
-            def __init__(self, num_samples):
-                self.num_samples = num_samples
-
-            def __len__(self):
-                return self.num_samples
-
-            def __getitem__(self, idx):
-                # Return mock data
-                template = torch.randn(3, 256, 256)
-                search = torch.randn(3, 256, 256)
-                bbox = torch.tensor([100, 100, 50, 50])  # x, y, w, h
-                return {
-                    'template_images': template,
-                    'search_images': search,
-                    'bbox': bbox
-                }
-
-        dataset = MockDataset(self.total_samples)
+    def create_dataloader(self):
+        """Create real LaSOT dataloader"""
+        from dataset_loader import LaSOTTrackingDataset
+        
+        dataset = LaSOTTrackingDataset(
+            self.dataset_info,
+            template_size=256,
+            search_size=256
+        )
+        
         return torch.utils.data.DataLoader(
             dataset,
             batch_size=8,
@@ -405,19 +366,10 @@ class Assignment3Trainer:
         """Main training loop"""
         self.logger.info("Initializing training...")
 
-        # Create model
-        try:
-            # Try to use real SeqTrack model
-            model = build_seqtrack(cfg)
-            self.using_real_seqtrack = True
-        except Exception as e:
-            # Fallback to mock model
-            if self.require_real_seqtrack:
-                self.logger.error("REQUIRE_REAL_SEQTRACK is set; failed to initialize real SeqTrack model")
-                raise
-            self.logger.warning(f"Using mock model for demonstration (reason: {e})")
-            model = self.create_mock_model()
-            self.using_real_seqtrack = False
+        # Create real SeqTrack model
+        model = build_seqtrack(cfg)
+        self.using_real_seqtrack = True
+        self.logger.info("Real SeqTrack model initialized successfully")
 
         # Move model to device
         model = model.to(self.device)
@@ -425,8 +377,8 @@ class Assignment3Trainer:
         # Create optimizer
         optimizer = optim.AdamW(model.parameters(), lr=1e-4, weight_decay=1e-4)
 
-        # Create dataloader
-        dataloader = self.create_mock_dataloader()
+        # Create real dataloader
+        dataloader = self.create_dataloader()
 
         self.logger.info(f"Training on {len(dataloader.dataset)} samples")
         self.logger.info(f"Selected classes: {self.dataset_info['selected_classes']}")
