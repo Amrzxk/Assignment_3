@@ -64,3 +64,6 @@ SeqTrack/
 .cache/
 lasot_extract/
 
+# Do not track training checkpoints
+checkpoints/
+
