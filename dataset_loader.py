@@ -18,18 +18,36 @@ from PIL import Image
 from huggingface_hub import list_repo_files, hf_hub_download
 
 def load_lasot_dataset() -> Dict:
-    """Download two class archives (airplane + one random) and prepare sample pairs.
+    """Prepare LaSOT samples from class ZIP archives (airplane + one random or pinned).
+
+    If LASOT_ZIP_ROOT is set and contains local ZIPs, we use those exclusively and
+    avoid any network calls (no need for HF credentials). Otherwise, we list and
+    pull class ZIPs from the Hugging Face dataset repo.
 
     Returns:
         dict with keys: selected_classes, class_counts, total_samples, samples, root_dir
     """
-    print("Indexing LaSOT archives on Hugging Face...")
-    repo_id = "l-lt/LaSOT"
-    files = list(list_repo_files(repo_id, repo_type="dataset"))
-    zip_files = [f for f in files if f.lower().endswith('.zip')]
-    classes = sorted(os.path.splitext(os.path.basename(f))[0] for f in zip_files)
-    if not classes:
-        raise RuntimeError("No .zip archives found in l-lt/LaSOT dataset")
+    # Prefer local ZIPs if provided
+    local_zip_root = os.environ.get('LASOT_ZIP_ROOT')
+    classes: List[str]
+    local_zip_map: Dict[str, str] = {}
+    if local_zip_root and os.path.isdir(local_zip_root):
+        print(f"Indexing LaSOT local archives in: {local_zip_root}")
+        for name in os.listdir(local_zip_root):
+            if name.lower().endswith('.zip'):
+                cls = os.path.splitext(name)[0]
+                local_zip_map[cls] = os.path.join(local_zip_root, name)
+        classes = sorted(local_zip_map.keys())
+        if not classes:
+            raise RuntimeError(f"No .zip archives found under {local_zip_root}")
+    else:
+        print("Indexing LaSOT archives on Hugging Face...")
+        repo_id = "l-lt/LaSOT"
+        files = list(list_repo_files(repo_id, repo_type="dataset"))
+        zip_files = [f for f in files if f.lower().endswith('.zip')]
+        classes = sorted(os.path.splitext(os.path.basename(f))[0] for f in zip_files)
+        if not classes:
+            raise RuntimeError("No .zip archives found in l-lt/LaSOT dataset")
 
     # Allow user to pin classes via env: LASOT_CLASSES="coin,hat" (no spaces)
     pinned = os.environ.get('LASOT_CLASSES')
@@ -55,22 +73,16 @@ def load_lasot_dataset() -> Dict:
 
     # Download and extract
     # Allow overriding locations via env
-    local_zip_root = os.environ.get('LASOT_ZIP_ROOT')  # where *.zip already exists (optional)
     extract_root_env = os.environ.get('LASOT_EXTRACT_ROOT')
     cache_root = os.path.abspath(extract_root_env or os.path.join('.', '.cache', 'lasot_zip'))
     os.makedirs(cache_root, exist_ok=True)
 
     extracted_roots: Dict[str, str] = {}
     for cls in selected_classes:
-        # Prefer local zip if provided
-        zip_path = None
-        if local_zip_root:
-            for name in [f"{cls}.zip", f"{cls.capitalize()}.zip", f"{cls.upper()}.zip"]:
-                cand = os.path.join(local_zip_root, name)
-                if os.path.isfile(cand):
-                    zip_path = cand
-                    break
+        # Use local ZIP if available, otherwise fetch from HF
+        zip_path = local_zip_map.get(cls)
         if zip_path is None:
+            repo_id = "l-lt/LaSOT"
             zip_path = hf_hub_download(repo_id=repo_id, filename=f"{cls}.zip", repo_type='dataset')
         target_dir = os.path.join(cache_root, 'train', cls)
         if not os.path.isdir(target_dir) or not os.listdir(target_dir):
