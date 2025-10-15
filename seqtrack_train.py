@@ -21,10 +21,30 @@ from datetime import datetime, timedelta
 import logging
 from tqdm import tqdm
 import json
+from typing import Optional
+import types
+import collections
 
-# Add SeqTrack to path
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'SeqTrack'))
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'SeqTrack', 'lib'))
+# Provide a compatibility shim for deprecated torch._six used by older deps
+try:
+    import torch._six  # noqa: F401
+except Exception:
+    shim = types.ModuleType('torch._six')
+    shim.string_classes = (str, bytes)
+    shim.int_classes = (int,)
+    shim.container_abcs = collections.abc
+    import sys as _sys  # local alias to avoid shadowing
+    _sys.modules['torch._six'] = shim
+
+# Add SeqTrack to path (support local and parent locations)
+_here = os.path.dirname(__file__)
+_seqtrack_local = os.path.join(_here, 'SeqTrack')
+_seqtrack_local_lib = os.path.join(_here, 'SeqTrack', 'lib')
+_seqtrack_parent = os.path.join(_here, '..', 'SeqTrack')
+_seqtrack_parent_lib = os.path.join(_here, '..', 'SeqTrack', 'lib')
+for _p in [_seqtrack_local, _seqtrack_local_lib, _seqtrack_parent, _seqtrack_parent_lib]:
+    if _p not in sys.path:
+        sys.path.append(_p)
 
 # Import SeqTrack modules
 try:
@@ -47,12 +67,18 @@ class Assignment3Trainer:
         self.epochs = 5
         self.patch_size = 1
         self.print_interval = 50
+        self.require_real_seqtrack = os.getenv('REQUIRE_REAL_SEQTRACK', '0') in ['1', 'true', 'True', 'YES', 'yes']
+        self.hf_repo_id: Optional[str] = os.getenv('HF_REPO_ID')  # e.g., org-or-user/assignment3-seqtrack
+        self.hf_token: Optional[str] = os.getenv('HF_TOKEN')
 
         # Initialize logging
         self.setup_logging()
 
         # Setup random seeds
         self.setup_seeds()
+
+        # Setup device (prefer CUDA if available)
+        self.device = self.setup_device()
 
         # Load dataset info
         self.dataset_info = self.load_dataset_info()
@@ -68,10 +94,22 @@ class Assignment3Trainer:
         random.seed(self.seed)
         np.random.seed(self.seed)
         torch.manual_seed(self.seed)
-        torch.cuda.manual_seed(self.seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed(self.seed)
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
         print(f"Random seed set to {self.seed}")
+
+    def setup_device(self):
+        """Select compute device and log it"""
+        if torch.cuda.is_available():
+            device = torch.device('cuda')
+            device_str = f"CUDA:{torch.cuda.current_device()} - {torch.cuda.get_device_name(torch.cuda.current_device())}"
+        else:
+            device = torch.device('cpu')
+            device_str = 'CPU'
+        self.logger.info(f"Using device: {device_str}")
+        return device
 
     def setup_logging(self):
         """Setup logging to both console and file"""
@@ -159,13 +197,19 @@ class Assignment3Trainer:
                 }
 
         dataset = MockDataset(self.total_samples)
-        return torch.utils.data.DataLoader(dataset, batch_size=8, shuffle=True)
+        return torch.utils.data.DataLoader(
+            dataset,
+            batch_size=8,
+            shuffle=True,
+            pin_memory=torch.cuda.is_available(),
+            num_workers=0 if os.name == 'nt' else 4,
+        )
 
-    def calculate_metrics(self, predictions, targets):
-        """Calculate training metrics (mock implementation)"""
-        # Mock metrics calculation
-        loss = torch.nn.functional.mse_loss(predictions, torch.randn_like(predictions))
-        iou = torch.rand(1).item()  # Mock IoU
+    def calculate_metrics(self, pred_tensor, targets):
+        """Calculate training metrics"""
+        # pred_tensor is guaranteed to be a tensor by the caller
+        loss = torch.nn.functional.mse_loss(pred_tensor, targets)
+        iou = torch.rand(1).item()  # Placeholder IoU
         return loss.item(), iou
 
     def log_training_progress(self, epoch, batch_idx, loss, iou, batch_time):
@@ -216,6 +260,37 @@ class Assignment3Trainer:
         torch.save(checkpoint, checkpoint_path)
         self.logger.info(f"Checkpoint saved: {checkpoint_path}")
 
+        # Also upload to Hugging Face if configured
+        try:
+            self.upload_checkpoint_to_hub(checkpoint_path)
+        except Exception as e:
+            self.logger.warning(f"Hugging Face upload skipped/failed: {e}")
+
+    def upload_checkpoint_to_hub(self, checkpoint_path: str):
+        """Upload a local checkpoint file to Hugging Face Hub if HF_REPO_ID is set.
+
+        Requires environment variables:
+        - HF_REPO_ID (mandatory), e.g., "your-username/seqtrack-assignment3"
+        - HF_TOKEN (optional, else relies on cached login)
+        """
+        if not self.hf_repo_id:
+            return  # not configured; silently skip
+
+        from huggingface_hub import HfApi
+
+        api = HfApi(token=self.hf_token)
+        # Create repo if it does not exist
+        api.create_repo(self.hf_repo_id, private=False, exist_ok=True)
+
+        filename = os.path.basename(checkpoint_path)
+        path_in_repo = f"checkpoints/{filename}"
+        api.upload_file(
+            path_or_fileobj=checkpoint_path,
+            path_in_repo=path_in_repo,
+            repo_id=self.hf_repo_id,
+        )
+        self.logger.info(f"Checkpoint uploaded to HF Hub: {self.hf_repo_id}/{path_in_repo}")
+
     def train_epoch(self, model, dataloader, optimizer, epoch):
         """Train one epoch"""
         model.train()
@@ -224,38 +299,100 @@ class Assignment3Trainer:
         batch_count = 0
 
         batch_start_time = time.time()
+        samples_processed_in_epoch = 0
+        last_50_start = time.time()
 
         for batch_idx, batch in enumerate(tqdm(dataloader, desc=f"Epoch {epoch}")):
             batch_start = time.time()
 
-            # Mock forward pass
+            # Fetch inputs
             if isinstance(batch, dict):
-                search_images = batch['search_images']
+                template_images = batch.get('template_images')
+                search_images = batch.get('search_images')
             else:
-                search_images = batch[0]
+                # Tuple-style fallback: (template, search)
+                template_images = batch[0] if isinstance(batch, (list, tuple)) and len(batch) > 0 else None
+                search_images = batch[1] if isinstance(batch, (list, tuple)) and len(batch) > 1 else batch[0]
+
+            # Move inputs to device
+            if template_images is not None:
+                template_images = template_images.to(self.device, non_blocking=True)
+            search_images = search_images.to(self.device, non_blocking=True)
 
             # Forward pass
             optimizer.zero_grad()
-            predictions = model(search_images)
+            # Forward pass (real SeqTrack expects [template, search])
+            if getattr(self, 'using_real_seqtrack', False) and template_images is not None:
+                inputs = [template_images, search_images]
+                predictions = model(inputs)
+            else:
+                predictions = model(search_images)
 
-            # Mock loss calculation
-            targets = torch.randn_like(predictions)
-            loss = torch.nn.functional.mse_loss(predictions, targets)
+            # Loss calculation placeholder: adapt to model output structure
+            # If the real model returns a list/tuple, pick the first tensor-like output
+            pred_tensor = None
+            if torch.is_tensor(predictions):
+                pred_tensor = predictions
+            elif isinstance(predictions, (list, tuple)):
+                for item in predictions:
+                    if torch.is_tensor(item):
+                        pred_tensor = item
+                        break
+            elif isinstance(predictions, dict):
+                # try common keys
+                for key in ['logits', 'output', 'pred', 'preds']:
+                    if key in predictions and torch.is_tensor(predictions[key]):
+                        pred_tensor = predictions[key]
+                        break
+                if pred_tensor is None:
+                    # take first tensor value
+                    for v in predictions.values():
+                        if torch.is_tensor(v):
+                            pred_tensor = v
+                            break
+
+            if pred_tensor is None:
+                raise RuntimeError("Could not extract tensor from model predictions for loss computation")
+
+            targets = torch.randn_like(pred_tensor)
+            loss = torch.nn.functional.mse_loss(pred_tensor, targets)
 
             # Backward pass
             loss.backward()
             optimizer.step()
 
             # Calculate metrics
-            loss_val, iou = self.calculate_metrics(predictions, targets)
+            loss_val, iou = self.calculate_metrics(pred_tensor, targets)
 
             epoch_loss += loss_val
             epoch_iou += iou
             batch_count += 1
 
-            # Log progress
-            batch_time = time.time() - batch_start
-            self.log_training_progress(epoch, batch_idx, loss_val, iou, batch_time)
+            # Log progress exactly every 50 samples
+            batch_size = search_images.shape[0]
+            samples_processed_in_epoch += batch_size
+            if samples_processed_in_epoch // self.print_interval != (samples_processed_in_epoch - batch_size) // self.print_interval:
+                # We just crossed a multiple of 50 samples
+                window_time = time.time() - last_50_start
+                # Time since beginning
+                elapsed_time = time.time() - self.start_time
+                # Remaining samples this epoch
+                remaining_samples_epoch = max(0, self.total_samples - samples_processed_in_epoch)
+                time_per_sample = window_time / self.print_interval if self.print_interval > 0 else 0.0
+                estimated_remaining_time = remaining_samples_epoch * time_per_sample
+
+                # Format message similar to assignment spec
+                elapsed_str = str(timedelta(seconds=int(elapsed_time)))
+                last50_str = str(timedelta(seconds=int(window_time)))
+                remaining_str = str(timedelta(seconds=int(estimated_remaining_time)))
+                msg = (
+                    f"Epoch {epoch} : {samples_processed_in_epoch} / {self.total_samples} samples , "
+                    f"time for last {self.print_interval} samples : {last50_str} , "
+                    f"time since beginning : {elapsed_str} , "
+                    f"time left to finish the epoch : {remaining_str}"
+                )
+                self.logger.info(msg)
+                last_50_start = time.time()
 
             batch_start_time = time.time()
 
@@ -272,10 +409,18 @@ class Assignment3Trainer:
         try:
             # Try to use real SeqTrack model
             model = build_seqtrack(cfg)
-        except:
+            self.using_real_seqtrack = True
+        except Exception as e:
             # Fallback to mock model
-            self.logger.warning("Using mock model for demonstration")
+            if self.require_real_seqtrack:
+                self.logger.error("REQUIRE_REAL_SEQTRACK is set; failed to initialize real SeqTrack model")
+                raise
+            self.logger.warning(f"Using mock model for demonstration (reason: {e})")
             model = self.create_mock_model()
+            self.using_real_seqtrack = False
+
+        # Move model to device
+        model = model.to(self.device)
 
         # Create optimizer
         optimizer = optim.AdamW(model.parameters(), lr=1e-4, weight_decay=1e-4)
@@ -289,6 +434,8 @@ class Assignment3Trainer:
         # Training loop
         for epoch in range(1, self.epochs + 1):
             self.current_epoch = epoch
+            # Re-seed all RNGs at each epoch per assignment requirement
+            self.setup_seeds()
             self.logger.info(f"Starting epoch {epoch}/{self.epochs}")
 
             # Train epoch

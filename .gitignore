@@ -53,3 +53,7 @@ Thumbs.db
 
 # Checkpoints (uncomment if you don't want to track checkpoints)
 # checkpoints/
+
+# Exclude VideoX folder (we only need SeqTrack subfolder)
+VideoX/
+
