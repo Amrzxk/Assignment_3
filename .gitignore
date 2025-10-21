@@ -54,11 +54,6 @@ Thumbs.db
 # Checkpoints (uncomment if you don't want to track checkpoints)
 # checkpoints/
 
-# Exclude VideoX folder (we only need SeqTrack subfolder)
-VideoX/
-
-# Exclude SeqTrack folder (now managed outside this repo)
-SeqTrack/
 
 # Local caches and extracted datasets
 .cache/

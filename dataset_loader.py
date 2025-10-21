@@ -66,8 +66,20 @@ def load_lasot_dataset() -> Dict:
             selected_classes.append('airplane')
         else:
             selected_classes.append(classes[0])
+
         remaining = [c for c in classes if c not in selected_classes]
-        if remaining:
+
+        preferred_env = os.environ.get('LASOT_SECONDARY_CHOICES')
+        if preferred_env:
+            preferred_pool = [c.strip() for c in preferred_env.split(',') if c.strip()]
+        else:
+            preferred_pool = ['coin', 'mouse']
+
+        preferred_candidates = [c for c in preferred_pool if c in remaining]
+
+        if preferred_candidates:
+            selected_classes.append(random.choice(preferred_candidates))
+        elif remaining:
             selected_classes.append(random.choice(remaining))
     print(f"Selected classes: {selected_classes}")
 
@@ -110,7 +122,7 @@ def load_lasot_dataset() -> Dict:
     max_seqs = int(max_seqs_env) if max_seqs_env and max_seqs_env.isdigit() else None
 
     for cls in selected_classes:
-        seqs = find_sequences(extracted_roots[cls])
+        seqs = sorted(find_sequences(extracted_roots[cls]))
         if max_seqs is not None:
             seqs = seqs[:max_seqs]
         for img_dir, gt_path in seqs:
@@ -128,16 +140,17 @@ def load_lasot_dataset() -> Dict:
                 img_files.sort(key=nat_sort_key)
                 if len(img_files) < 2 or len(bboxes) < 2:
                     continue
-                # Generate up to 3 pairs per sequence
-                for idx in [1, len(img_files)//2, len(img_files)-1]:
-                    if idx < len(img_files) and idx < len(bboxes):
-                        samples.append({
-                            'template_path': img_files[0],
-                            'search_path': img_files[idx],
-                            'bbox': bboxes[idx],
-                            'class_name': cls
-                        })
-                        class_counts[cls] += 1
+                # Use first frame as template, iterate over all remaining frames
+                template_path = img_files[0]
+                upper = min(len(img_files), len(bboxes))
+                for idx in range(1, upper):
+                    samples.append({
+                        'template_path': template_path,
+                        'search_path': img_files[idx],
+                        'bbox': bboxes[idx],
+                        'class_name': cls
+                    })
+                    class_counts[cls] += 1
             except Exception:
                 continue
 

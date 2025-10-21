@@ -2,11 +2,13 @@
 """
 Modified SeqTrack Training Script for Assignment 3
 - Seed = 8 (team number)
-- Epochs = 5
+- Epochs = 10
 - Patch size = 1
 - Two-class dataset support (airplane + one random class)
 - Detailed logging every 50 samples
-- Checkpoint saving after each epoch
+- Comprehensive checkpointing with RNG states and scheduler
+- Learning rate scheduler with deterministic training
+- Resume capability from checkpoints
 """
 
 import os
@@ -34,6 +36,7 @@ except Exception:
     shim.int_classes = (int,)
     shim.container_abcs = collections.abc
     import sys as _sys  # local alias to avoid shadowing
+
     _sys.modules['torch._six'] = shim
 
 # Add SeqTrack to path (support local and parent locations)
@@ -64,9 +67,10 @@ class Assignment3Trainer:
 
     def __init__(self):
         self.seed = 8  # Team number
-        self.epochs = 5
+        self.epochs = 10
         self.patch_size = 1
         self.print_interval = 50
+        self.dataset_samples = 27000  # Total target samples across entire run
         self.hf_repo_id: Optional[str] = os.getenv('HF_REPO_ID')  # e.g., org-or-user/assignment3-seqtrack
         self.hf_token: Optional[str] = os.getenv('HF_TOKEN')
 
@@ -86,17 +90,17 @@ class Assignment3Trainer:
         self.start_time = time.time()
         self.current_epoch = 0
         self.samples_processed = 0
-        self.total_samples = self.dataset_info['total_samples']
+        self.total_samples = 0
 
     def setup_seeds(self):
-        """Set random seeds globally"""
+        """Set random seeds globally for deterministic training"""
         random.seed(self.seed)
         np.random.seed(self.seed)
         torch.manual_seed(self.seed)
-        if torch.cuda.is_available():
-            torch.cuda.manual_seed(self.seed)
+        torch.cuda.manual_seed_all(self.seed)
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
+        torch.use_deterministic_algorithms(True)
         print(f"Random seed set to {self.seed}")
 
     def setup_device(self):
@@ -112,7 +116,9 @@ class Assignment3Trainer:
 
     def setup_logging(self):
         """Setup logging to both console and file"""
-        log_file = 'training_log.txt'
+        logs_dir = 'logs'
+        os.makedirs(logs_dir, exist_ok=True)
+        log_file = os.path.join(logs_dir, 'training_log.txt')
 
         # Create logger
         self.logger = logging.getLogger('assignment3')
@@ -140,6 +146,7 @@ class Assignment3Trainer:
 
         self.logger.info("=== Assignment 3 SeqTrack Training Started ===")
         self.logger.info(f"Seed: {self.seed}, Epochs: {self.epochs}, Patch Size: {self.patch_size}")
+        self.logger.info(f"Planned total samples across run: {self.dataset_samples}")
 
     def load_dataset_info(self):
         """Load dataset information"""
@@ -148,23 +155,45 @@ class Assignment3Trainer:
         print_dataset_summary(dataset_info)
         return dataset_info
 
-    def create_dataloader(self):
-        """Create real LaSOT dataloader"""
+    def prepare_dataset_plan(self):
+        """Prepare dataset indices and per-epoch sampling plan"""
         from dataset_loader import LaSOTTrackingDataset
-        
+
         dataset = LaSOTTrackingDataset(
             self.dataset_info,
             template_size=256,
             search_size=256
         )
-        
-        return torch.utils.data.DataLoader(
-            dataset,
-            batch_size=8,
-            shuffle=True,
-            pin_memory=torch.cuda.is_available(),
-            num_workers=0 if os.name == 'nt' else 4,
+
+        total_samples_available = len(dataset)
+        total_target_samples = min(self.dataset_samples, total_samples_available)
+        total_epochs = self.epochs
+
+        base_per_epoch = total_target_samples // total_epochs
+        remainder = total_target_samples % total_epochs
+
+        per_epoch_limits = [base_per_epoch + (1 if epoch < remainder else 0) for epoch in range(total_epochs)]
+
+        cumulative = 0
+        for idx, limit in enumerate(per_epoch_limits):
+            cumulative += limit
+            if cumulative > total_samples_available:
+                reduction = cumulative - total_samples_available
+                per_epoch_limits[idx] = max(0, limit - reduction)
+                cumulative -= reduction
+                for j in range(idx + 1, len(per_epoch_limits)):
+                    per_epoch_limits[j] = 0
+                break
+
+        rng = random.Random(self.seed)
+        indices = list(range(total_samples_available))
+        rng.shuffle(indices)
+
+        self.logger.info(
+            f"Dataset pool size: {total_samples_available} samples | Planned training usage: {total_target_samples}"
         )
+
+        return dataset, indices, per_epoch_limits
 
     def calculate_metrics(self, pred_tensor, targets):
         """Calculate training metrics"""
@@ -173,48 +202,50 @@ class Assignment3Trainer:
         iou = torch.rand(1).item()  # Placeholder IoU
         return loss.item(), iou
 
-    def log_training_progress(self, epoch, batch_idx, loss, iou, batch_time):
-        """Log training progress every 50 samples"""
-        if batch_idx % self.print_interval == 0:
-            # Calculate time metrics
-            current_time = time.time()
-            elapsed_time = current_time - self.start_time
-            time_per_sample = batch_time / self.print_interval
+    def log_training_progress(self, epoch, samples_processed, samples_target, window_time):
+        """Log training progress every print_interval samples"""
+        current_time = time.time()
+        elapsed_time = current_time - self.start_time
+        time_per_sample = window_time / self.print_interval if self.print_interval else 0.0
+        remaining_samples = max(0, samples_target - samples_processed)
+        estimated_remaining_time = remaining_samples * time_per_sample
 
-            remaining_samples = (self.epochs - epoch) * self.total_samples + (
-                        self.epochs - epoch) * self.total_samples + (self.total_samples - batch_idx)
-            estimated_remaining_time = remaining_samples * time_per_sample
+        elapsed_str = str(timedelta(seconds=int(elapsed_time)))
+        window_str = str(timedelta(seconds=int(window_time)))
+        remaining_str = str(timedelta(seconds=int(estimated_remaining_time)))
 
-            # Format times
-            elapsed_str = str(timedelta(seconds=int(elapsed_time)))
-            batch_time_str = str(timedelta(seconds=int(batch_time)))
-            remaining_str = str(timedelta(seconds=int(estimated_remaining_time)))
+        log_message = (
+            f"Epoch {epoch}: {samples_processed}/{samples_target} samples | "
+            f"Time for last {self.print_interval} samples: {window_str} | "
+            f"Time since beginning: {elapsed_str} | "
+            f"Time left to finish epoch: {remaining_str}"
+        )
 
-            log_message = (
-                f"Epoch {epoch}: {batch_idx}/{self.total_samples} | "
-                f"Loss: {loss:.4f} | IoU: {iou:.4f} | "
-                f"Time for last {self.print_interval} samples: {batch_time_str} | "
-                f"Time since beginning: {elapsed_str} | "
-                f"Time left to finish epoch: {remaining_str}"
-            )
+        self.logger.info(log_message)
 
-            self.logger.info(log_message)
-
-    def save_checkpoint(self, epoch, model, optimizer, loss):
-        """Save checkpoint after each epoch"""
+    def save_checkpoint(self, epoch, model, optimizer, scheduler, loss):
+        """Save comprehensive checkpoint after each epoch with RNG states"""
         checkpoint_dir = 'checkpoints'
         os.makedirs(checkpoint_dir, exist_ok=True)
 
         checkpoint_path = os.path.join(checkpoint_dir, f'epoch_{epoch}.ckpt')
 
+        # Get RNG states
+        rng_state = {
+            'python': random.getstate(),
+            'numpy': np.random.get_state(),
+            'torch': torch.get_rng_state(),
+            'cuda': torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None
+        }
+
         checkpoint = {
             'epoch': epoch,
             'model_state_dict': model.state_dict(),
             'optimizer_state_dict': optimizer.state_dict(),
+            'scheduler_state_dict': scheduler.state_dict(),
+            'rng_state': rng_state,
             'loss': loss,
             'seed': self.seed,
-            'patch_size': self.patch_size,
-            'dataset_info': self.dataset_info,
             'timestamp': datetime.now().isoformat()
         }
 
@@ -227,6 +258,34 @@ class Assignment3Trainer:
         except Exception as e:
             self.logger.warning(f"Hugging Face upload skipped/failed: {e}")
 
+    def load_checkpoint(self, checkpoint_path, model, optimizer, scheduler):
+        """Load checkpoint and restore all states for deterministic resume"""
+        if not os.path.exists(checkpoint_path):
+            raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
+
+        checkpoint = torch.load(checkpoint_path, map_location=self.device)
+
+        # Restore model and optimizer states
+        model.load_state_dict(checkpoint['model_state_dict'])
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+
+        # Restore RNG states
+        rng_state = checkpoint['rng_state']
+        random.setstate(rng_state['python'])
+        np.random.set_state(rng_state['numpy'])
+        torch.set_rng_state(rng_state['torch'])
+        if rng_state['cuda'] is not None and torch.cuda.is_available():
+            torch.cuda.set_rng_state_all(rng_state['cuda'])
+
+        epoch = checkpoint['epoch']
+        loss = checkpoint['loss']
+
+        self.logger.info(f"Checkpoint loaded: {checkpoint_path}")
+        self.logger.info(f"Resuming from epoch {epoch} with loss {loss:.4f}")
+
+        return epoch, loss
+
     def upload_checkpoint_to_hub(self, checkpoint_path: str):
         """Upload a local checkpoint file to Hugging Face Hub if HF_REPO_ID is set.
 
@@ -237,27 +296,46 @@ class Assignment3Trainer:
         if not self.hf_repo_id:
             return  # not configured; silently skip
 
-        from huggingface_hub import HfApi
+        try:
+            from huggingface_hub import HfApi
 
-        api = HfApi(token=self.hf_token)
-        # Create repo if it does not exist
-        api.create_repo(self.hf_repo_id, private=False, exist_ok=True)
+            api = HfApi(token=self.hf_token)
+            # Create repo if it does not exist
+            api.create_repo(self.hf_repo_id, private=False, exist_ok=True)
 
-        filename = os.path.basename(checkpoint_path)
-        path_in_repo = f"checkpoints/{filename}"
-        api.upload_file(
-            path_or_fileobj=checkpoint_path,
-            path_in_repo=path_in_repo,
-            repo_id=self.hf_repo_id,
-        )
-        self.logger.info(f"Checkpoint uploaded to HF Hub: {self.hf_repo_id}/{path_in_repo}")
+            filename = os.path.basename(checkpoint_path)
+            path_in_repo = f"checkpoints/{filename}"
+            api.upload_file(
+                path_or_fileobj=checkpoint_path,
+                path_in_repo=path_in_repo,
+                repo_id=self.hf_repo_id,
+            )
+            self.logger.info(f"Checkpoint uploaded to HF Hub: {self.hf_repo_id}/{path_in_repo}")
+        except Exception as e:
+            self.logger.warning(f"Failed to upload checkpoint to Hugging Face: {e}")
 
-    def train_epoch(self, model, dataloader, optimizer, epoch):
+    def find_latest_checkpoint(self):
+        """Find the latest checkpoint file"""
+        checkpoint_dir = 'checkpoints'
+        if not os.path.exists(checkpoint_dir):
+            return None
+
+        checkpoint_files = [f for f in os.listdir(checkpoint_dir) if f.startswith('epoch_') and f.endswith('.ckpt')]
+        if not checkpoint_files:
+            return None
+
+        # Sort by epoch number
+        checkpoint_files.sort(key=lambda x: int(x.split('_')[1].split('.')[0]))
+        latest_checkpoint = os.path.join(checkpoint_dir, checkpoint_files[-1])
+        return latest_checkpoint
+
+    def train_epoch(self, model, dataloader, optimizer, epoch, scheduler, samples_target):
         """Train one epoch"""
         model.train()
         epoch_loss = 0
         epoch_iou = 0
         batch_count = 0
+        epoch_start_time = time.time()
 
         batch_start_time = time.time()
         samples_processed_in_epoch = 0
@@ -332,38 +410,30 @@ class Assignment3Trainer:
             # Log progress exactly every 50 samples
             batch_size = search_images.shape[0]
             samples_processed_in_epoch += batch_size
-            if samples_processed_in_epoch // self.print_interval != (samples_processed_in_epoch - batch_size) // self.print_interval:
+
+            if samples_processed_in_epoch >= samples_target:
+                samples_processed_in_epoch = samples_target
+
+            if samples_processed_in_epoch // self.print_interval != (
+                    samples_processed_in_epoch - batch_size) // self.print_interval:
                 # We just crossed a multiple of 50 samples
                 window_time = time.time() - last_50_start
-                # Time since beginning
-                elapsed_time = time.time() - self.start_time
-                # Remaining samples this epoch
-                remaining_samples_epoch = max(0, self.total_samples - samples_processed_in_epoch)
-                time_per_sample = window_time / self.print_interval if self.print_interval > 0 else 0.0
-                estimated_remaining_time = remaining_samples_epoch * time_per_sample
-
-                # Format message similar to assignment spec
-                elapsed_str = str(timedelta(seconds=int(elapsed_time)))
-                last50_str = str(timedelta(seconds=int(window_time)))
-                remaining_str = str(timedelta(seconds=int(estimated_remaining_time)))
-                msg = (
-                    f"Epoch {epoch} : {samples_processed_in_epoch} / {self.total_samples} samples , "
-                    f"time for last {self.print_interval} samples : {last50_str} , "
-                    f"time since beginning : {elapsed_str} , "
-                    f"time left to finish the epoch : {remaining_str}"
-                )
-                self.logger.info(msg)
+                self.log_training_progress(epoch, samples_processed_in_epoch, samples_target, window_time)
                 last_50_start = time.time()
+
+            if samples_processed_in_epoch >= samples_target:
+                break
 
             batch_start_time = time.time()
 
         avg_loss = epoch_loss / batch_count
         avg_iou = epoch_iou / batch_count
+        epoch_duration = time.time() - epoch_start_time
 
-        return avg_loss, avg_iou
+        return avg_loss, avg_iou, epoch_duration
 
     def train(self):
-        """Main training loop"""
+        """Main training loop with resume capability"""
         self.logger.info("Initializing training...")
 
         # Create real SeqTrack model
@@ -377,44 +447,102 @@ class Assignment3Trainer:
         # Create optimizer
         optimizer = optim.AdamW(model.parameters(), lr=1e-4, weight_decay=1e-4)
 
-        # Create real dataloader
-        dataloader = self.create_dataloader()
+        # Create learning rate scheduler
+        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=3, gamma=0.1)
 
-        self.logger.info(f"Training on {len(dataloader.dataset)} samples")
+        # Create dataset access plan
+        dataset, shuffled_indices, epoch_sample_limits = self.prepare_dataset_plan()
+
+        self.logger.info("Training with distributed sample budget across epochs")
         self.logger.info(f"Selected classes: {self.dataset_info['selected_classes']}")
+        self.logger.info(f"Per-epoch sample plan: {epoch_sample_limits}")
+
+        # Check for existing checkpoints and offer to resume
+        start_epoch = 1
+        latest_checkpoint = self.find_latest_checkpoint()
+        if latest_checkpoint:
+            try:
+                resume = input(f"Found checkpoint: {latest_checkpoint}. Resume training? (y/n): ").lower().strip()
+                if resume == 'y':
+                    start_epoch, _ = self.load_checkpoint(latest_checkpoint, model, optimizer, scheduler)
+                    start_epoch += 1  # Resume from next epoch
+                    self.logger.info(f"Resuming training from epoch {start_epoch}")
+            except KeyboardInterrupt:
+                self.logger.info("Training cancelled by user")
+                return
+            except Exception as e:
+                self.logger.warning(f"Failed to resume from checkpoint: {e}")
+                self.logger.info("Starting training from beginning")
 
         # Training loop
-        for epoch in range(1, self.epochs + 1):
+        for epoch_idx, epoch in enumerate(range(start_epoch, self.epochs + 1)):
             self.current_epoch = epoch
             # Re-seed all RNGs at each epoch per assignment requirement
             self.setup_seeds()
+
+            epoch_start_time = time.time()
             self.logger.info(f"Starting epoch {epoch}/{self.epochs}")
 
-            # Train epoch
-            avg_loss, avg_iou = self.train_epoch(model, dataloader, optimizer, epoch)
+            samples_this_epoch = epoch_sample_limits[epoch_idx] if epoch_idx < len(epoch_sample_limits) else 0
 
-            # Log epoch results
-            self.logger.info(f"Epoch {epoch} completed - Loss: {avg_loss:.4f}, IoU: {avg_iou:.4f}")
+            if samples_this_epoch <= 0:
+                self.logger.info(f"Skipping epoch {epoch} (no samples allocated)")
+                continue
+
+            # Train epoch
+            start_idx = sum(epoch_sample_limits[:epoch_idx])
+            end_idx = start_idx + samples_this_epoch
+            epoch_indices = shuffled_indices[start_idx:end_idx]
+
+            dataloader = torch.utils.data.DataLoader(
+                dataset,
+                batch_size=8,
+                sampler=torch.utils.data.SubsetRandomSampler(epoch_indices),
+                pin_memory=torch.cuda.is_available(),
+                num_workers=0 if os.name == 'nt' else 4,
+            )
+
+            avg_loss, avg_iou, epoch_duration = self.train_epoch(
+                model,
+                dataloader,
+                optimizer,
+                epoch,
+                scheduler,
+                samples_this_epoch
+            )
+
+            # Step the scheduler
+            scheduler.step()
+            current_lr = scheduler.get_last_lr()[0]
+
+            # Log epoch results with enhanced information
+            epoch_summary = (
+                f"Epoch [{epoch}/{self.epochs}] Summary:\n"
+                f"Avg Loss: {avg_loss:.4f} | Avg IoU: {avg_iou:.4f} | LR: {current_lr:.6f}\n"
+                f"Epoch Duration: {timedelta(seconds=int(epoch_duration))}"
+            )
+            self.logger.info(epoch_summary)
 
             # Save checkpoint
-            self.save_checkpoint(epoch, model, optimizer, avg_loss)
+            self.save_checkpoint(epoch, model, optimizer, scheduler, avg_loss)
 
         # Training completed
         total_time = time.time() - self.start_time
         self.logger.info(f"Training completed successfully in {timedelta(seconds=int(total_time))}")
         self.logger.info("Checkpoints saved in: checkpoints/")
-        self.logger.info("Log file: training_log.txt")
+        self.logger.info("Log file: logs/training_log.txt")
 
         print("\n✅ Training completed successfully.")
         print("Checkpoints saved in: checkpoints/")
-        print("Log file: training_log.txt")
+        print("Log file: logs/training_log.txt")
 
 
 def main():
     """Main function"""
     print("=== Assignment 3: SeqTrack Setup, Training, and Checkpoint Management ===")
     print("Team Number: 8")
-    print("Seed: 8, Epochs: 5, Patch Size: 1")
+    print("Seed: 8, Epochs: 10, Patch Size: 1")
+    print("Target Samples per Epoch: 27,000")
     print("=" * 70)
 
     trainer = Assignment3Trainer()

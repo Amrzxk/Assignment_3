@@ -2,7 +2,7 @@
 ## Dataset Summary
 
 ### Selected Classes:
-- **airplane**: 60 samples
-- **coin**: 60 samples
+- **airplane**: 85901 samples
+- **coin**: 37449 samples
 
-### Total Samples: 120
+### Total Samples: 123350
