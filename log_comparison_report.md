@@ -4,7 +4,7 @@
 
 - **Previous Run**: `logs/training_log_prev.txt`
 - **New Run (Resumed)**: `logs/training_log.txt`
-- **Comparison Date**: 2025-10-23 09:13:15
+- **Comparison Date**: 2025-10-23 09:24:19
 
 ## ✅ Resume Information
 
@@ -25,9 +25,9 @@
 | Epoch | Prev Loss | New Loss | Prev IoU | New IoU | Prev LR | New LR |
 |-------|-----------|----------|----------|---------|---------|--------|
 | 1 | 1.0480 | N/A | 0.4991 | N/A | 0.000100 | N/A |
-| 2 | 1.0319 | 1.0179 | 0.4991 | 0.4991 | 0.000100 | 0.000010 |
+| 2 | 1.0319 | N/A | 0.4991 | N/A | 0.000100 | N/A |
 | 3 | 1.0229 | N/A | 0.4991 | N/A | 0.000010 | N/A |
-| 4 | 1.0186 | 1.0491 | 0.4991 | 0.5080 | 0.000010 | 0.000100 |
+| 4 | 1.0186 | 1.0179 | 0.4991 | 0.4991 | 0.000010 | 0.000010 |
 | 5 | 1.0179 | N/A | 0.4991 | N/A | 0.000010 | N/A |
 | 6 | 1.0172 | 1.0172 | 0.4991 | 0.4991 | 0.000001 | 0.000001 |
 | 7 | 1.0167 | 1.0167 | 0.4991 | 0.4991 | 0.000001 | 0.000001 |
@@ -38,16 +38,18 @@
 
 ## ⚠️ Detected Differences
 
-❌ **Epoch mismatch**: Previous run had epochs [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], new run has [2, 4, 6, 7, 8, 9, 10]
-⚠️  **Epoch 2 Loss difference**: Prev=1.0319, New=1.0179, Δ=0.0140
-ℹ️  **Epoch 2 Duration**: Prev=0:02:53, New=0:03:08
-⚠️  **Epoch 4 Loss difference**: Prev=1.0186, New=1.0491, Δ=0.0305
-⚠️  **Epoch 4 IoU difference**: Prev=0.4991, New=0.5080, Δ=0.0089
-ℹ️  **Epoch 4 Duration**: Prev=0:02:54, New=1:01:02
+❌ **Epoch mismatch**: Previous run had epochs [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], new run has [4, 6, 7, 8, 9, 10]
+
+ℹ️  **Epoch 4 Duration**: Prev=0:02:54, New=0:03:08
+
 ℹ️  **Epoch 6 Duration**: Prev=0:02:55, New=0:03:06
+
 ℹ️  **Epoch 7 Duration**: Prev=0:02:55, New=0:03:07
+
 ℹ️  **Epoch 8 Duration**: Prev=0:02:54, New=0:03:07
+
 ℹ️  **Epoch 9 Duration**: Prev=0:02:54, New=0:03:07
+
 ℹ️  **Epoch 10 Duration**: Prev=0:02:54, New=0:03:07
 
 ## Training Duration

@@ -50,34 +50,9 @@
 2025-10-23 08:39:23,338 - INFO - Epoch 4: 1752/2700 samples | Time for last 50 samples: 0:00:03 | Time since beginning: 0:02:25 | Time left to finish epoch: 0:00:59
 2025-10-23 08:39:26,448 - INFO - Epoch 4: 1800/2700 samples | Time for last 50 samples: 0:00:03 | Time since beginning: 0:02:29 | Time left to finish epoch: 0:00:55
 2025-10-23 08:39:30,079 - INFO - Epoch 4: 1856/2700 samples | Time for last 50 samples: 0:00:03 | Time since beginning: 0:02:32 | Time l2025-10-23 08:39:48,572 - INFO - Epoch 1: 1952/2700 samples | Time for last 50 samples: 0:01:20 | Time since beginning: 0:39:59 | Time left to finish epoch: 0:20:06
-2025-10-23 08:41:14,061 - INFO - Epoch 1: 2000/2700 samples | Time for last 50 samples: 0:01:25 | Time since beginning: 0:41:25 | Time left to finish epoch: 0:19:56
-2025-10-23 08:43:02,728 - INFO - Epoch 1: 2056/2700 samples | Time for last 50 samples: 0:01:48 | Time since beginning: 0:43:13 | Time left to finish epoch: 0:23:19
-2025-10-23 08:44:31,751 - INFO - Epoch 1: 2104/2700 samples | Time for last 50 samples: 0:01:29 | Time since beginning: 0:44:43 | Time left to finish epoch: 0:17:41
-2025-10-23 08:46:02,988 - INFO - Epoch 1: 2152/2700 samples | Time for last 50 samples: 0:01:31 | Time since beginning: 0:46:14 | Time left to finish epoch: 0:16:39
-2025-10-23 08:47:33,560 - INFO - Epoch 1: 2200/2700 samples | Time for last 50 samples: 0:01:30 | Time since beginning: 0:47:44 | Time left to finish epoch: 0:15:05
-2025-10-23 08:49:17,852 - INFO - Epoch 1: 2256/2700 samples | Time for last 50 samples: 0:01:44 | Time since beginning: 0:49:29 | Time left to finish epoch: 0:15:26
-2025-10-23 08:50:49,281 - INFO - Epoch 1: 2304/2700 samples | Time for last 50 samples: 0:01:31 | Time since beginning: 0:51:00 | Time left to finish epoch: 0:12:04
-2025-10-23 08:52:17,310 - INFO - Epoch 1: 2352/2700 samples | Time for last 50 samples: 0:01:28 | Time since beginning: 0:52:28 | Time left to finish epoch: 0:10:12
-2025-10-23 08:53:51,999 - INFO - Epoch 1: 2400/2700 samples | Time for last 50 samples: 0:01:34 | Time since beginning: 0:54:03 | Time left to finish epoch: 0:09:28
-2025-10-23 08:55:35,091 - INFO - Epoch 1: 2456/2700 samples | Time for last 50 samples: 0:01:43 | Time since beginning: 0:55:46 | Time left to finish epoch: 0:08:23
-2025-10-23 08:57:10,496 - INFO - Epoch 1: 2504/2700 samples | Time for last 50 samples: 0:01:35 | Time since beginning: 0:57:21 | Time left to finish epoch: 0:06:13
-2025-10-23 08:58:36,972 - INFO - Epoch 1: 2552/2700 samples | Time for last 50 samples: 0:01:26 | Time since beginning: 0:58:48 | Time left to finish epoch: 0:04:15
-2025-10-23 09:00:11,403 - INFO - Epoch 1: 2600/2700 samples | Time for last 50 samples: 0:01:34 | Time since beginning: 1:00:22 | Time left to finish epoch: 0:03:08
-2025-10-23 09:01:38,663 - INFO - Epoch 1: 2656/2700 samples | Time for last 50 samples: 0:01:27 | Time since beginning: 1:01:49 | Time left to finish epoch: 0:01:16
-2025-10-23 09:02:35,430 - INFO - Epoch 1: 2700/2700 samples | Time for last 50 samples: 0:00:56 | Time since beginning: 1:02:46 | Time left to finish epoch: 0:00:00
-2025-10-23 09:02:35,455 - INFO - Epoch [1/10] Summary:
-Avg Loss: 1.0491 | Avg IoU: 0.5080 | LR: 0.000100
-Epoch Duration: 1:01:02
-2025-10-23 09:02:36,477 - INFO - Checkpoint saved: checkpoints\epoch_1.ckpt
-2025-10-23 09:02:36,523 - INFO - Starting epoch 2/10
-2025-10-23 09:03:45,825 - INFO - Epoch 2: 56/2700 samples | Time for last 50 samples: 0:01:09 | Time since beginning: 1:03:57 | Time left to finish epoch: 1:01:04
-2025-10-23 09:04:43,903 - INFO - Epoch 2: 104/2700 samples | Time for last 50 samples: 0:00:58 | Time since beginning: 1:04:55 | Time left to finish epoch: 0:50:15
-2025-10-23 09:05:41,585 - INFO - Epoch 2: 152/2700 samples | Time for last 50 samples: 0:00:57 | Time since beginning: 1:05:52 | Time left to finish epoch: 0:48:59
-2025-10-23 09:06:39,190 - INFO - Epoch 2: 200/2700 samples | Time for last 50 samples: 0:00:57 | Time since beginning: 1:06:50 | Time left to finish epoch: 0:48:00
-2025-10-23 09:07:45,866 - INFO - Epoch 2: 256/2700 samples | Time for last 50 samples: 0:01:06 | Time since beginning: 1:07:57 | Time left to finish epoch: 0:54:19
-2025-10-23 09:08:42,792 - INFO - Epoch 2: 304/2700 samples | Time for last 50 samples: 0:00:56 | Time since beginning: 1:08:54 | Time left to finish epoch: 0:45:27
-2025-10-23 09:09:39,717 - INFO - Epoch 2: 352/2700 samples | Time for last 50 samples: 0:00:56 | Time since beginning: 1:09:50 | Time left to finish epoch: 0:44:33
-5
+2025-10-23 08:39:33,893 - INFO - Epoch [4/10] Summary:
+Avg Loss: 1.0186 | Avg IoU: 0.4991 | LR: 0.000010
+Epoch Duration: 0:02:54
 2025-10-23 08:41:07,145 - INFO - Epoch 5: 352/2700 samples | Time for last 50 samples: 0:00:03 | Time since beginning: 0:04:09 | Time left to finish epoch: 0:02:23
 2025-10-23 08:41:10,269 - INFO - Epoch 5: 400/2700 samples | Time for last 50 samples: 0:00:03 | Time since beginning: 0:04:12 | Time left to finish epoch: 0:02:23
 2025-10-23 08:41:13,877 - INFO - Epoch 5: 456/2700 samples | Time for last 50 samples: 0:00:03 | Time since beginning: 0:04:16 | Time left to finish epoch: 0:02:41
