@@ -21,6 +21,7 @@ import torch.nn as nn
 import torch.optim as optim
 from datetime import datetime, timedelta
 import logging
+import inspect
 from tqdm import tqdm
 import json
 from typing import Optional
@@ -82,6 +83,10 @@ class Assignment3Trainer:
 
         # Setup device (prefer CUDA if available)
         self.device = self.setup_device()
+
+        # Ensure deterministic-compatible cuBLAS workspace configuration
+        if torch.backends.cudnn.is_available() and torch.cuda.is_available():
+            os.environ.setdefault('CUBLAS_WORKSPACE_CONFIG', ':4096:8')
 
         # Load dataset info
         self.dataset_info = self.load_dataset_info()
@@ -263,7 +268,24 @@ class Assignment3Trainer:
         if not os.path.exists(checkpoint_path):
             raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
 
-        checkpoint = torch.load(checkpoint_path, map_location=self.device)
+        # Allow legacy NumPy globals required by older checkpoints
+        add_safe_globals = getattr(torch.serialization, "add_safe_globals", None)
+        if add_safe_globals is not None:
+            try:
+                add_safe_globals([np.core.multiarray._reconstruct])
+            except Exception:
+                pass
+
+        load_kwargs = {"map_location": self.device}
+        if "weights_only" in inspect.signature(torch.load).parameters:
+            load_kwargs["weights_only"] = False
+
+        try:
+            checkpoint = torch.load(checkpoint_path, **load_kwargs)
+        except TypeError:
+            # Older PyTorch versions without weights_only parameter
+            load_kwargs.pop("weights_only", None)
+            checkpoint = torch.load(checkpoint_path, **load_kwargs)
 
         # Restore model and optimizer states
         model.load_state_dict(checkpoint['model_state_dict'])
@@ -274,9 +296,49 @@ class Assignment3Trainer:
         rng_state = checkpoint['rng_state']
         random.setstate(rng_state['python'])
         np.random.set_state(rng_state['numpy'])
-        torch.set_rng_state(rng_state['torch'])
-        if rng_state['cuda'] is not None and torch.cuda.is_available():
-            torch.cuda.set_rng_state_all(rng_state['cuda'])
+
+        def _ensure_byte_tensor(state):
+            if state is None:
+                return None
+            if torch.is_tensor(state):
+                tensor = state.detach().contiguous().cpu()
+            elif isinstance(state, (bytes, bytearray)):
+                tensor = torch.tensor(list(state), dtype=torch.uint8)
+            elif isinstance(state, np.ndarray):
+                tensor = torch.from_numpy(state)
+            elif isinstance(state, (list, tuple)):
+                tensor = torch.tensor(state)
+            else:
+                raise TypeError(f"Unsupported RNG state type: {type(state)}")
+
+            if tensor.dtype != torch.uint8:
+                tensor = tensor.to(torch.uint8)
+            if tensor.device.type != 'cpu':
+                tensor = tensor.cpu()
+            return tensor.contiguous()
+
+        torch_rng_state = _ensure_byte_tensor(rng_state['torch'])
+        if torch_rng_state is None:
+            raise ValueError("Checkpoint missing torch RNG state")
+        torch.set_rng_state(torch_rng_state)
+
+        cuda_rng_state = rng_state.get('cuda')
+        if cuda_rng_state is not None and torch.cuda.is_available():
+            try:
+                if isinstance(cuda_rng_state, (list, tuple)):
+                    cuda_states = []
+                    for idx, s in enumerate(cuda_rng_state):
+                        normalized = _ensure_byte_tensor(s)
+                        # Move to the specific CUDA device
+                        cuda_states.append(normalized.cuda(idx))
+                else:
+                    normalized = _ensure_byte_tensor(cuda_rng_state)
+                    cuda_states = [normalized.cuda()]
+                torch.cuda.set_rng_state_all(cuda_states)
+            except Exception as e:
+                self.logger.warning(f"Could not restore CUDA RNG state: {e}. Training will continue with fresh CUDA RNG.")
+                # Re-initialize CUDA RNG deterministically
+                torch.cuda.manual_seed_all(self.seed)
 
         epoch = checkpoint['epoch']
         loss = checkpoint['loss']
