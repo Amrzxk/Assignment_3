@@ -34,11 +34,11 @@
 
 ## Evaluation Graphs
 
-![Overall Metrics](evaluation_graph.png)
+![Overall Metrics](testing/evaluation_graph.png)
 
-![AUC vs Epoch](evaluation_auc_graph.png)
+![AUC vs Epoch](testing/evaluation_auc_graph.png)
 
-![Inference FPS vs Epoch](evaluation_fps_graph.png)
+![Inference FPS vs Epoch](testing/evaluation_fps_graph.png)
 
 ## Class-wise Metrics
 
@@ -57,11 +57,11 @@
 | 9 | 28.85 | 40.94 | 28.90 | 20.96 | 8.57 | 20.91 |
 | 10 | 30.13 | 41.35 | 30.12 | 18.64 | 6.28 | 18.41 |
 
-![Class IoU vs Epoch](evaluation_class_iou.png)
+![Class IoU vs Epoch](testing/evaluation_class_iou.png)
 
-![Class AUC vs Epoch](evaluation_class_auc.png)
+![Class AUC vs Epoch](testing/evaluation_class_auc.png)
 
-![Class Precision vs Epoch](evaluation_class_precision.png)
+![Class Precision vs Epoch](testing/evaluation_class_precision.png)
 
 ## Conclusions
 
