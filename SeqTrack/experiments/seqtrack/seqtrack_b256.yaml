@@ -23,39 +23,49 @@ DATA:
   TRAIN:
     DATASETS_NAME:
     - LASOT
-    - GOT10K_vottrain
-    - COCO17
-    - TRACKINGNET
     DATASETS_RATIO:
     - 1
-    - 1
-    - 1
-    - 1
-    SAMPLE_PER_EPOCH: 60000
+    SAMPLE_PER_EPOCH: 3500
+    SUBSET:
+      CLASSES:
+      - airplane
+      - coin
+      TRAIN_SPLIT: 0.8
+      EXCLUDE:
+      - airplane-1
+      - airplane-9
+      - airplane-13
+      - airplane-15
+      - coin-3
+      - coin-6
+      - coin-7
+      - coin-18
 MODEL:
   ENCODER:
     TYPE: vit_base_patch16
     PRETRAIN_TYPE: mae
   DECODER:
-    DEC_LAYERS: 2
+    DEC_LAYERS: 6
   HIDDEN_DIM: 256
   BINS: 4000
   FEATURE_TYPE: x
 TRAIN:
   ENCODER_MULTIPLIER: 0.1
-  BATCH_SIZE: 16
-  EPOCH: 500
+  BATCH_SIZE: 2
+  EPOCH: 10
   GRAD_CLIP_NORM: 0.1
   CE_WEIGHT: 1.0
   LR: 0.0001
   LR_DROP_EPOCH: 400
-  NUM_WORKER: 8
+  NUM_WORKER: 2
   OPTIMIZER: ADAMW
   PRINT_INTERVAL: 50
   SCHEDULER:
     TYPE: step
     DECAY_RATE: 0.1
   WEIGHT_DECAY: 0.0001
+  SAVE_EVERY_EPOCH: true
+  SEED: 42
 TEST:
   EPOCH: 500
   SEARCH_FACTOR: 4.0
