@@ -62,3 +62,9 @@
 ![Class AUC vs Epoch](evaluation_class_auc.png)
 
 ![Class Precision vs Epoch](evaluation_class_precision.png)
+
+## Conclusions
+
+The experiment demonstrates what we expect when fine‑tuning a large tracking model on a very small, class‑restricted LaSOT subset and stopping after 10 epochs. Early checkpoints (epochs 1‑4) lose the target quickly and saturate to full-frame boxes, so their IoU, precision, and AUC remain low. Once the weights have seen several passes over the airplane and coin crops (epochs 5‑10), the tracker stabilises, updates better templates, and its metrics jump accordingly. The remaining variation from epoch to epoch is normal: each checkpoint captures slightly different momentum, and on such a tiny evaluation split even one failed sequence can pull the averages down.
+
+Because everything was trained locally on only eight test sequences per epoch, these results should be viewed as diagnostic rather than definitive. Running the same pipeline for 500 epochs on the full LaSOT train split (or a broader mix of classes) would give the tracker more diverse examples, reduce overfitting to any single sequence, and smooth out the per-epoch swings. Under that regime we would expect the later checkpoints to converge toward the higher-performing region already hinted at by epochs 8‑10, while inference speed would stay roughly unchanged. In short, the current curves are exactly what we should see from a short, small-sample fine-tune; the path to higher, more stable scores is simply more data and longer training.
